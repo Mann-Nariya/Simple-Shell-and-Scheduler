@@ -41,7 +41,7 @@ struct Queue {
     int size;
     int front;
     int rear;
-    int lock_status; // 1 means that the queue is locked and 0 means that the process is not locked
+    //int lock_status; // 1 means that the queue is locked and 0 means that the process is not locked
     pid_t *pid_arr;
 };
 
