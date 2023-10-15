@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/time.h>
 #include <time.h>
 
 
@@ -60,12 +61,12 @@ void create_queue(struct Queue *q, int size_a){
 
 void enqueue(struct Queue *q, pid_t pid_1){
 
-    if((q->rear+1)%q->size==q->front){
+    if((q->front+1)%q->size==q->rear){
         printf("Error in adding to the queue because full");
     }
     else{
-        q->rear=(q->rear+1)%q->size;
-        q->pid_arr[q->rear]=pid_1;
+        q->front=(q->front+1)%q->size;
+        q->pid_arr[q->front]=pid_1;
     }
 
 }
@@ -73,12 +74,12 @@ void enqueue(struct Queue *q, pid_t pid_1){
 pid_t dequeue(struct Queue *q){
     pid_t pid_2=-1;
 
-    if(q->front==q->rear){
+    if(q->rear==q->front){
         printf("Error in removing from queue because empty\n");
     }
     else{
-        q->front=(q->front+1)%q->size;
-        pid_2 = q->pid_arr[q->front];
+        q->rear=(q->rear+1)%q->size;
+        pid_2 = q->pid_arr[q->rear];
     }
     return pid_2;
 }
@@ -91,7 +92,7 @@ int isEmpty_queue(struct Queue* q){
 }
 
 int isFull_queue(struct Queue* q){
-    if((q ->rear+1)%q->size == q->front){
+    if(((q ->front)+1)%q->size == q->rear){
         return 1;
     }
     return 0;
@@ -310,34 +311,45 @@ void scheduler(shm_t ptr_to_dt){
 
             // struct sigevent alrm_timer;
             // timer_t timer_for_signal;
-
             // alrm_timer.sigev_notify = SIGEV_SIGNAL;
             // alrm_timer.sigev_signo = SIGALRM;
-
             // struct itimerspec timer_1;
-
+            // int time_for_exec_per = TSLICE * 1000000;
             // timer_1.it_value.tv_sec = 0; //initial time = 0
-            // timer_1.it_value.tv_nsec = TSLICE * 1000000;
-
+            // timer_1.it_value.tv_nsec = time_for_exec_per;
+            // timer_1.it_interval.tv_sec = 0;
+            // timer_1.it_interval.tv_nsec = 0;
             // int creating_timer = timer_create(CLOCK_REALTIME, &alrm_timer, &timer_for_signal);
-
             // if(creating_timer == -1){
             //     perror("timer_create");
             //     exit(EXIT_FAILURE);
             // }
-
             // int timer_settingtime = timer_settime(&timer_for_signal, 0, &timer_1, NULL);
-
             // if(timer_settingtime == -1){
             //     perror("timer_settime fail");
             //     exit(EXIT_FAILURE);
             // }
+
+
+            int length_timer = TSLICE *1000;
+            
+            struct itimerval timer12;
+            timer12.it_value.tv_sec=0;
+            timer12.it_value.tv_usec=length_timer;
+            timer12.it_interval.tv_sec=0;
+            timer12.it_interval.tv_usec=0;
+
             
             signal(SIGALRM,timer_signal_handler);
-            alarm(TSLICE);
+            int settimflag=setitimer(ITIMER_REAL,&timer12,NULL);
+            if(settimflag == -1){
+                perror("setitimer");
+                exit(EXIT_FAILURE);
+            }
+            //alarm(TSLICE);
             
             //continues execution till timer is not expired
-            while(!timer_signal_handler){
+            while(timerexpiredflag!=1){
                 if(start_signal_sent==0){
                     
                     //using the for loop for sending the SIGCONT signal to all the processes that have been dequeued
@@ -445,7 +457,6 @@ int main(int argc, char* argv[]){
     }
     else if(schedule_fork == 0){
 
-        printf("schedler_init");
 
         scheduler(ptr_to_shared_mem);
 
