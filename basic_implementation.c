@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <time.h>
 
 
 //all the commands get stored in this array
@@ -25,6 +27,7 @@ int num_commands = 0;
 // max commands using pipe "|" can be 10
 char *commands_[10];
 volatile int timerexpiredflag=0;
+//volatile int siginthandler_fag = 0;
 
 int NCPU;
 int TSLICE;
@@ -32,9 +35,6 @@ int TSLICE;
 // struct Queue running_queue;
 
 #define SHARED_MEM_SPACE 4096
-
-
-
 
 struct Queue {
     int size;
@@ -47,6 +47,7 @@ struct Queue {
 typedef struct shm_t{
     struct Queue ready_queue;
     struct Queue running_queue;
+    int siginthandler_flag;
 } *shm_t;
 
 shm_t ptr_to_shared_mem;
@@ -287,8 +288,17 @@ int Process_control_block(shm_t ptr_to_shared_mem1){
 void scheduler(shm_t ptr_to_dt){
     //continual execution of the scheduler with the while loop
     while(true){
+
         if(isEmpty_queue(&ptr_to_dt->ready_queue)== 1){
             continue;
+        }
+        else if(ptr_to_shared_mem->siginthandler_flag == 1 && isEmpty_queue(&ptr_to_dt->ready_queue)== 1){
+            printf("Start of Stats by scheduler");
+
+            //function for calling the stats to the scheduler
+
+            printf("End of Stats by scheduler");
+            break;
         }
         else{
             
@@ -298,10 +308,34 @@ void scheduler(shm_t ptr_to_dt){
             int iterator = ptr_to_dt->running_queue.front;
             int max_size_running = ptr_to_dt->running_queue.size;
 
+            // struct sigevent alrm_timer;
+            // timer_t timer_for_signal;
+
+            // alrm_timer.sigev_notify = SIGEV_SIGNAL;
+            // alrm_timer.sigev_signo = SIGALRM;
+
+            // struct itimerspec timer_1;
+
+            // timer_1.it_value.tv_sec = 0; //initial time = 0
+            // timer_1.it_value.tv_nsec = TSLICE * 1000000;
+
+            // int creating_timer = timer_create(CLOCK_REALTIME, &alrm_timer, &timer_for_signal);
+
+            // if(creating_timer == -1){
+            //     perror("timer_create");
+            //     exit(EXIT_FAILURE);
+            // }
+
+            // int timer_settingtime = timer_settime(&timer_for_signal, 0, &timer_1, NULL);
+
+            // if(timer_settingtime == -1){
+            //     perror("timer_settime fail");
+            //     exit(EXIT_FAILURE);
+            // }
+            
             signal(SIGALRM,timer_signal_handler);
             alarm(TSLICE);
             
-
             //continues execution till timer is not expired
             while(!timer_signal_handler){
                 if(start_signal_sent==0){
@@ -353,17 +387,13 @@ void scheduler(shm_t ptr_to_dt){
     }
 }
 
-//int dummy_main(int argc, char* argv[]);
-
-
-// static int NCPU;
-// static int TSLICE;
-// static struct Queue ready_queue;
-// static struct Queue running_queue;
+void sigint_handler_fn(int signal){
+    ptr_to_shared_mem->siginthandler_flag = 1;
+}
 
 //program execution starts here
 int main(int argc, char* argv[]){
-
+    
      //checking if the number of cli arguments are correct
      if(argc != 3){
         printf("Incorrect number of cli arguments, ending program execution with error code 1");
@@ -373,6 +403,9 @@ int main(int argc, char* argv[]){
     //using atoi function to convert arguments from strings to integers
     NCPU= atoi(argv[1]);
     TSLICE = atoi(argv[2]);
+
+    //setting up signal for SIGINT
+    signal(SIGINT, sigint_handler_fn);
 
     //setting up the shared memory space
     const char *mem_name = "/shared_mem_scheduler_shell";
@@ -397,17 +430,23 @@ int main(int argc, char* argv[]){
 
     create_queue(&ptr_to_shared_mem->ready_queue, 100);
     create_queue(&ptr_to_shared_mem->running_queue,50);
+    ptr_to_shared_mem->siginthandler_flag =0 ;
 
     if(ptr_to_shared_mem == MAP_FAILED){
         perror("mmap");
         exit(EXIT_FAILURE); 
     }
 
+    
     pid_t schedule_fork = fork();
     if(schedule_fork == -1){
         perror("forking");
+        exit(EXIT_FAILURE);
     }
     else if(schedule_fork == 0){
+
+        printf("schedler_init");
+
         scheduler(ptr_to_shared_mem);
 
         int munmap_result = munmap(ptr_to_shared_mem, SHARED_MEM_SPACE);
@@ -418,17 +457,20 @@ int main(int argc, char* argv[]){
         close(shm_file_d);
     }
     else{
-    
+
+
+
+    //part of code where the simple shell will be executing in parallel to the scheduler
     do{
 
-        //displaying the command prompt of out choice as asked in part 'b'
-        // if(scheduler_launched_flag==0){
-        //     //initiating the scheduler
-        //     scheduler();
-        //     scheduler_launched_flag=1;
-        // }
+        printf("shell loop");
 
-        
+        if(ptr_to_shared_mem->siginthandler_flag == 1){
+            printf("Start of history by Simpleshell");
+            print_history_cmd();
+            printf("End of history by Simpleshell");
+            break;
+        }
         memset(input,0,sizeof(input));
         printf("SimpleShell@Grp-52: > ");
         fgets(input,100,stdin);
