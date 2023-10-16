@@ -8,6 +8,11 @@
 #include <sys/time.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/time.h>
+#include <time.h>
 
 
 //all the commands get stored in this array
@@ -24,138 +29,148 @@ int num_commands = 0;
 char *commands_[10];
 volatile int timerexpiredflag=0;
 
+//volatile int siginthandler_fag = 0;
+
 int NCPU;
 int TSLICE;
-struct Queue priority_queue[5];
-struct Queue ready_queue;
-struct Queue running_queue;
+
+#define SHARED_MEM_SPACE 4096
+
+//functions of the priority queue
 
 
-// //declaring a typedef for the advanced implementation
-// typedef struct {
-//     pid_t pid_proc;
-//     int priority;
-// }queue_pair;
 
-// //struct of priority queue which has a array of queue_pair instead of pids
-// struct Priority_Queue{
+// struct Queue {
 //     int size;
 //     int front;
 //     int rear;
-//     // int lock_status; // 1 means that the Priority_Queue is locked and 0 means that the process is not locked
-//     queue_pair *pair_arr;
+//     pid_t *pid_arr;
 // };
 
+typedef struct {
+    pid_t pid_proc;
+    int priority;
+}queue_pair;
 
-// void create_priorityqueue(struct Priority_Queue *q, int size_a){
-//     q->size = size_a;
-//     q->front= q->rear = -1;
-//     q->pair_arr = (pid_t *)malloc(size_a*sizeof(queue_pair));
-// };
-
-// void enqueue_priority_queue(struct Priority_Queue *q, pid_t pid_1, int priority1){
-
-//     queue_pair temp_pair;
-
-//     temp_pair.pid_proc = pid_1;
-//     temp_pair.priority = priority1;
-
-//     if((q->rear+1)%q->size==q->front){
-//         printf("Error in adding to the Priority_Queue because queue is full");
-//     }
-//     else{
-//         q->rear=(q->rear+1)%q->size;
-//         q->pair_arr[q->rear]=temp_pair;
-//     }
-
-// }
-
-// queue_pair dequeue_priority_queue(struct Priority_Queue *q){
-    
-//     queue_pair temp_result;
-
-//     if(q->front==q->rear){
-//         printf("Error in removing from Priority_Queue because queue is empty\n");
-//     }
-//     else{
-//         q->front=(q->front+1)%q->size;
-
-//         temp_result.pid_proc = q->pair_arr->pid_proc;
-//         temp_result.priority = q->pair_arr->priority;
-//         //pid_2 = q->pair_arr[q->front];
-//     }
-//     return temp_result;
-// }
-
-// int isEmpty_priorityqueue(struct Priority_Queue* q){
-//     if(q->front== q->rear){
-//         return 1;
-//     }
-//     return 0;
-// }
-
-// int isFull_priorityqueue(struct Priority_Queue* q){
-//     if((q ->rear+1)%q->size == q->front){
-//         return 1;
-//     }
-//     return 0;
-// }
-
-
-//definitions for the regular queue
-struct Queue{
+struct Priority_Queue{
     int size;
     int front;
     int rear;
-    int lock_status; // 1 means that the queue is locked and 0 means that the process is not locked
-    pid_t *pid_arr;
+    queue_pair *pair_arr;
 };
 
-void create_queue(struct Queue *q, int size_a){
+typedef struct shm_t{
+    struct Priority_Queue priority_queue[5];
+    struct Priority_Queue running_queue;
+    int siginthandler_flag;
+    int priority_queues_empty_flag;
+} *shm_t;
+
+shm_t ptr_to_shared_mem;
+
+
+//functions of the priority queue
+
+void create_priorityqueue(struct Priority_Queue *q, int size_a){
     q->size = size_a;
     q->front= q->rear = -1;
-    q->pid_arr = (pid_t *)malloc(size_a*sizeof(pid_t));
-}
+    q->pair_arr = (queue_pair *)malloc(size_a*sizeof(queue_pair));
+};
 
-void enqueue(struct Queue *q, pid_t pid_1){
+void enqueue_priority_queue(struct Priority_Queue *q, pid_t pid_1, int priority1){
 
-    if((q->rear+1)%q->size==q->front){
-        printf("Error in adding to the queue because full");
-    }
-    else{
-        q->rear=(q->rear+1)%q->size;
-        q->pid_arr[q->rear]=pid_1;
-    }
+    queue_pair temp_pair;
 
-}
+    temp_pair.pid_proc = pid_1;
+    temp_pair.priority = priority1;
 
-pid_t dequeue(struct Queue *q){
-    pid_t pid_2=-1;
-
-    if(q->front==q->rear){
-        printf("Error in removing from queue because empty\n");
+    if((q->front+1)%q->size==q->rear){
+        printf("Error in adding to the Priority_Queue because queue is full");
     }
     else{
         q->front=(q->front+1)%q->size;
-        pid_2 = q->pid_arr[q->front];
+        q->pair_arr[q->front]=temp_pair;
     }
-    return pid_2;
+
 }
 
-int isEmpty_queue(struct Queue* q){
+queue_pair dequeue_priority_queue(struct Priority_Queue *q){
+    
+    queue_pair temp_result;
+
+    if(q->front==q->rear){
+        printf("Error in removing from Priority_Queue because queue is empty\n");
+    }
+    else{
+        q->rear=(q->rear+1)%q->size;
+
+        temp_result.pid_proc = q->pair_arr->pid_proc;
+        temp_result.priority = q->pair_arr->priority;
+    }
+    return temp_result;
+}
+
+int isEmpty_priorityqueue(struct Priority_Queue* q){
     if(q->front== q->rear){
         return 1;
     }
     return 0;
 }
 
-int isFull_queue(struct Queue* q){
-    if((q ->rear+1)%q->size == q->front){
+int isFull_priorityqueue(struct Priority_Queue* q){
+    if((q ->front+1)%q->size == q->rear){
         return 1;
     }
     return 0;
 }
 
+
+//funtions of the regular queue
+
+// void create_queue(struct Queue *q, int size_a){
+//     q->size = size_a;
+//     q->front= q->rear = -1;
+//     q->pid_arr = (pid_t *)malloc(size_a*sizeof(pid_t));
+// }
+
+// void enqueue(struct Queue *q, pid_t pid_1){
+
+//     if((q->front+1)%q->size==q->rear){
+//         printf("Error in adding to the queue because full");
+//     }
+//     else{
+//        q->front=(q->front+1)%q->size;
+//         q->pid_arr[q->front]=pid_1;
+//     }
+
+// }
+
+// pid_t dequeue(struct Queue *q){
+//     pid_t pid_2=-1;
+
+//     if(q->rear==q->front){
+//         printf("Error in removing from queue because empty\n");
+//     }
+//     else{
+//         q->rear=(q->rear+1)%q->size;
+//         pid_2 = q->pid_arr[q->rear];
+//     }
+//     return pid_2;
+// }
+
+// int isEmpty_queue(struct Queue* q){
+//     if(q->front== q->rear){
+//         return 1;
+//     }
+//     return 0;
+// }
+
+// int isFull_queue(struct Queue* q){
+//     if(((q ->front)+1)%q->size == q->rear){
+//         return 1;
+//     }
+//     return 0;
+// }
 
 
 //this function can be used for implementing the history command as told in 'g'
@@ -216,7 +231,7 @@ char** seperate_user_input(char* usr_input){
 }
 
 
-// function for running the process which don't require scheduling
+// function for forking the process into two parts and executing using the array of arguments sreated in the seperate_usr_input function
 int create_process_to_run(char** enter_the_ptr_to_Array){
     char **arr_of_args = enter_the_ptr_to_Array;
     pid_t processes_status_1=fork();
@@ -245,10 +260,8 @@ int create_process_to_run(char** enter_the_ptr_to_Array){
     return processes_status_1;
 }
 
-//function for running the process which need scheduling
 int create_process_for_scheduling(char** enter_ptr_to_arr){
     char **arr_of_args1 = enter_ptr_to_arr;
-
     pid_t process_status_2 = fork();
 
     if(process_status_2 <0){
@@ -264,34 +277,32 @@ int create_process_for_scheduling(char** enter_ptr_to_arr){
         if(result_of_kill_here == 0){
             //need to add the commands that will execute the binary that has been uploaded
 
-            char* args_to_run = {arr_of_args1[1],NULL};
+            char* args_to_run[] = {arr_of_args1[1],NULL};
             execv(args_to_run[0],args_to_run);
             perror("execv");
             exit(EXIT_FAILURE);
         }
+
         //case when the sigstop failed.
         else{
             perror("SIGSTOP in process for scheduler");
             //need to add something else?
         }
+
+    //parent process
     }
     else{
         pid_t pid_to_enqueue= getpid();
 
         //enqueuing the process id to the ready queue
         if(arr_of_args1[2] != NULL){
-            int priority= arr_of_args1[2];
-            enqueue(&priority_queue[priority],pid_to_enqueue);
+            int priority= atoi(arr_of_args1[2]);
+            enqueue_priority_queue(&ptr_to_shared_mem->priority_queue[priority],pid_to_enqueue,priority);
         }
         else{
             int priority=1;
-            enqueue(&priority_queue[priority],pid_to_enqueue); 
+            enqueue_priority_queue(&ptr_to_shared_mem->priority_queue[priority],pid_to_enqueue,priority); 
         }
-        //enqueue(*ready_queue, pid_to_enqueue);
-
-
-        //pause the child process here or in the child process itself
-        //printf("It is the parent process");
     }
 
     return process_status_2;
@@ -340,28 +351,24 @@ void timer_signal_handler(int signo){
 }
 
 
-//priority scheduling implementation
-int Process_control_block(){
+// simple round robin implementation
+int Process_control_block(shm_t ptr_to_shared_mem1){
     int no_proc=0;
-    // for(int i=0; i<NCPU;i++){
-    //             if(isEmpty_queue(ready_queue)==0){
-    //                 process_arr[i]=dequeue(ready_queue);
-    //                 no_proc++;
-    //             }
-    //         }
-
     for(int j=4; j>=1 ; j--){
         if(no_proc == NCPU){
             break;
         }
-        if(isEmpty_queue(&priority_queue[j])==1){
+        if(isEmpty_priorityqueue(&ptr_to_shared_mem1->priority_queue[j])==1){
+            
             continue;
         }
         else{
-            while(isEmpty_queue(&priority_queue[j])==0 || no_proc != NCPU){
-                pid_t temp_pid;
-                temp_pid= dequeue(&priority_queue[j]);
-                enqueue(&ready_queue,temp_pid);
+            while(isEmpty_priorityqueue(&ptr_to_shared_mem1->priority_queue[j])==0 || no_proc != NCPU){
+                queue_pair temp_pair= dequeue_priority_queue(&ptr_to_shared_mem1->priority_queue[j]);
+                pid_t temp_pid = temp_pair.pid_proc;
+                int temp_priority=1;
+
+                enqueue_priority_queue(&ptr_to_shared_mem1->running_queue, temp_pid,temp_priority);
                 no_proc++;
             }
         }
@@ -369,35 +376,68 @@ int Process_control_block(){
     return no_proc;
 }
 
-void scheduler(){
+int isPriorityQueueEmptyChecker(){
+    int empty_flag=4;
+    for(int i=4;i>=1;i--){
+        if(isEmpty_priorityqueue(&ptr_to_shared_mem->priority_queue[i])== 1){
+            empty_flag--;
+        }
+    }
+    if(empty_flag == 0){
+        ptr_to_shared_mem->priority_queues_empty_flag = 1;
+        return 1;
+    }
+    return 0;
+}
 
+
+void scheduler(shm_t ptr_to_dt){
     //continual execution of the scheduler with the while loop
     while(true){
-        if(isEmpty_queue(&ready_queue)== 1){
+
+        if(isPriorityQueueEmptyChecker() == 1){
             continue;
         }
-        else{
-            //int arr_len=NCPU;
-            //pid_t process_arr[NCPU]={-1};
-            int no_proc=Process_control_block();
 
-            //setting up out signal handler for the SIGALRM signal
-            signal(SIGALRM,timer_signal_handler);
+        else if(ptr_to_shared_mem->siginthandler_flag == 1 && ptr_to_shared_mem->priority_queues_empty_flag== 1){
+            printf("Start of Stats by scheduler");
+
+            //function for calling the stats to the scheduler
+
+            printf("End of Stats by scheduler");
+            break;
+        }
+        else{
+            
+            int no_proc=Process_control_block(ptr_to_dt);
 
             int start_signal_sent=0; //0 means not sent and 1 means sent
-            int iterator = running_queue.front;
-            int max_size_running = running_queue.size;
-            //setting the alarm for the execution of the while loop for only the tslice
-            alarm(TSLICE);
-            
+            int iterator = ptr_to_dt->running_queue.front;
+            int max_size_running = ptr_to_dt->running_queue.size;
 
+            int length_timer = TSLICE *1000;
+            
+            struct itimerval timer12;
+            timer12.it_value.tv_sec=0;
+            timer12.it_value.tv_usec=length_timer;
+            timer12.it_interval.tv_sec=0;
+            timer12.it_interval.tv_usec=0;
+
+            
+            signal(SIGALRM,timer_signal_handler);
+            int settimflag=setitimer(ITIMER_REAL,&timer12,NULL);
+            if(settimflag == -1){
+                perror("setitimer");
+                exit(EXIT_FAILURE);
+            }
+            //alarm(TSLICE);
+            
             //continues execution till timer is not expired
-            while(!timer_signal_handler){
+            while(timerexpiredflag!=1){
                 if(start_signal_sent==0){
-                    
-                    //using the for loop for sending the SIGCONT signal to all the processes that have been dequeued
-                    while(iterator != running_queue.rear){
-                        kill(running_queue.pid_arr[iterator],SIGCONT);
+
+                    while(iterator != ptr_to_dt->running_queue.rear){
+                        kill(ptr_to_dt->running_queue.pair_arr[iterator].pid_proc,SIGCONT);
                         iterator = (iterator+1)%max_size_running;
                     }
                     //for ensuring that the sigcont signal is send only once
@@ -409,46 +449,41 @@ void scheduler(){
             }
             start_signal_sent=0;
 
-            //needs to get work done here
+            int iterator1 = ptr_to_dt->running_queue.front;
 
-            int iterator1= running_queue.front;
             //timer expired the program exits from the loop now sending the signal to the process to pause execution using SIGSTOP
-            while(iterator1 != running_queue.rear){
-                pid_t temp_store = dequeue(&running_queue);
-
-                int kill_result=kill(temp_store,SIGSTOP);
+            // for(int i=0; i<no_proc;i++){
+            while(iterator1 != ptr_to_dt->running_queue.rear){
+                queue_pair temp_store_pair = dequeue_priority_queue(&ptr_to_dt->running_queue);
+                
+                int kill_result=kill(temp_store_pair.pid_proc,SIGSTOP);
                 if(kill_result == 0){
-                    //normal functioning add code here
-
-                    //enqueue the process to the ready queue
-                    enqueue(&ready_queue,process_arr[i]);
+                    
+                    enqueue_priority_queue(&ptr_to_dt->priority_queue[temp_store_pair.priority],temp_store_pair.pid_proc,temp_store_pair.priority);
                     //printf("the process is not terminated and it exists");
                 }
                 else if(kill_result == ESRCH){
-                    //process_arr[i]=-1;
+                    // process_arr[i]=-1;
                     //not enqueueing back to the qeueue because it is termainated
                 }
                 else{
                     //error in killing the process in which case print the error
-                    perror("Killing in scheduler");
+                    perror("error in Killing in scheduler");
                 }
-
                 iterator1 = (iterator1+1)%max_size_running;
             }
         }
     }
+    
 }
 
-//int dummy_main(int argc, char* argv[]);
-
-
-//defining the static variables
-
-
+void sigint_handler_fn(int signal){
+    ptr_to_shared_mem->siginthandler_flag = 1;
+}
 
 //program execution starts here
 int main(int argc, char* argv[]){
-
+    
      //checking if the number of cli arguments are correct
      if(argc != 3){
         printf("Incorrect number of cli arguments, ending program execution with error code 1");
@@ -459,27 +494,76 @@ int main(int argc, char* argv[]){
     NCPU= atoi(argv[1]);
     TSLICE = atoi(argv[2]);
 
-    //making the ready queue that will be used in the scheduler for scheduling processes
-    //global struct Queue *ready_queue and running queue;
-    create_queue(&ready_queue, 100);
-    create_queue(&running_queue,50);
+    //setting up signal for SIGINT
+    signal(SIGINT, sigint_handler_fn);
 
-    //indivisially creating the priority queue for the priority queue
-    create_queue(&priority_queue[1],100);
-    create_queue(&priority_queue[2],100);
-    create_queue(&priority_queue[3],100);
-    create_queue(&priority_queue[4],100);
+    //setting up the shared memory space
+    const char *mem_name = "/shared_mem_scheduler_shell";
+    int flags = O_CREAT | O_RDWR;
+    mode_t shared_mem_mode = 0666;
+
+    int shm_file_d = shm_open(mem_name,flags, shared_mem_mode);
+    if(shm_file_d == -1){
+        perror("shm_open error");
+        exit(EXIT_FAILURE);
+    }
+
+    int fd_result = ftruncate(shm_file_d, SHARED_MEM_SPACE);
+    if(fd_result == -1){
+        perror("fdtruncate");
+        return -1;
+    }
+
+    int prot = PROT_READ | PROT_WRITE;
+
+    ptr_to_shared_mem =(shm_t) mmap(0 ,SHARED_MEM_SPACE, prot, MAP_SHARED, shm_file_d, 0);
+
+    create_priorityqueue(&ptr_to_shared_mem->running_queue,50);
+    ptr_to_shared_mem->siginthandler_flag =0 ;
+    ptr_to_shared_mem->priority_queues_empty_flag=0;
+    
+    create_priorityqueue(&ptr_to_shared_mem->priority_queue[0],1);
+    for(int i=1;i<5;i++){
+        create_priorityqueue(&ptr_to_shared_mem->priority_queue[i],100);
+    }
+
+
+
+    if(ptr_to_shared_mem == MAP_FAILED){
+        perror("mmap");
+        exit(EXIT_FAILURE); 
+    }
 
     
-    //flag to check if the scheduler is launched or not
-    int scheduler_launched_flag=0;
+    pid_t schedule_fork = fork();
+    if(schedule_fork == -1){
+        perror("forking");
+        exit(EXIT_FAILURE);
+    }
+    else if(schedule_fork == 0){
+
+        scheduler(ptr_to_shared_mem);
+
+        int munmap_result = munmap(ptr_to_shared_mem, SHARED_MEM_SPACE);
+        if(munmap_result == -1){
+            perror("munmap");
+            exit(EXIT_FAILURE);
+        }
+        close(shm_file_d);
+    }
+    else{
+
+
+    //part of code where the simple shell will be executing in parallel to the scheduler
     do{
 
-        //displaying the command prompt of out choice as asked in part 'b'
-        if(scheduler_launched_flag==0){
-            //initiating the scheduler
-            scheduler();
-            scheduler_launched_flag=1;
+        printf("shell loop");
+
+        if(ptr_to_shared_mem->siginthandler_flag == 1){
+            printf("Start of history by Simpleshell");
+            print_history_cmd();
+            printf("End of history by Simpleshell");
+            break;
         }
         memset(input,0,sizeof(input));
         printf("SimpleShell@Grp-52: > ");
@@ -516,6 +600,18 @@ int main(int argc, char* argv[]){
         // i++;
     }while(1);
 
+    int munmap_result1 = munmap(ptr_to_shared_mem, SHARED_MEM_SPACE);
+        if(munmap_result1 == -1){
+            perror("munmap");
+            exit(EXIT_FAILURE);
+        }
+    close(shm_file_d);
+    
+    if(shm_unlink(mem_name)==-1){
+        perror("shm unlink");
+        exit(EXIT_FAILURE);
+    }
+    }
 
     return 0;
 }
