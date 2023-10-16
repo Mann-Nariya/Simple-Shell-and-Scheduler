@@ -1,0 +1,14 @@
+Assignment 2
+Description
+
+
+Contributions :
+Manas Chhabra   2022276     Handling errors, debugging and testing code.
+Mann Nariya     2022278     Writing the functions required for the SimpleSchedular, using mmap,shm,.
+
+Project Description :
+The simpleSchedular works along side with simpleShell. When we "submit" a process in the simpleShell, it's PID gets stored in the ready_queue. This process gets into running queue and is implimented using round robin approach, i.e. each process runs for limited time(TSLICE) on the CPU and then ceases its functioning till it's next turn. We use queue in shared memory to prevent race condition.
+In advanced functionalities, we use priority queue to implement the SimpleSchedular so that we can specify certainn priority to a process to implement it first. Customizable priority levels allow for experimentation with different scheduling algorithms.
+
+Github Repository Link:
+https://github.com/Mann-Nariya/Operating_Systems_Assignment-3
